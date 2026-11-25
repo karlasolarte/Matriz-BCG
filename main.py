@@ -40,46 +40,100 @@ def cargar_datos():
     return df
 
 
-def dibujar(df):
-    colores = {"Estrella": "#f2b705", "Interrogante": "#2a7de1",
-               "Vaca": "#2e9e5b", "Perro": "#c0392b"}
+# Paleta "Storytelling with Data": todo en gris y un solo color para el mensaje
+GRIS_CLARO = "#D9D9D9"
+GRIS = "#BFBFBF"
+GRIS_TEXTO = "#7F7F7F"
+GRIS_OSCURO = "#404040"
+COLOR_FOCO = "#1F5FA6"
 
-    fig, ax = plt.subplots(figsize=(11, 8))
+
+def coma(valor, decimales=1):
+    """Formato numérico español: 12.6 -> '12,6'."""
+    return f"{valor:.{decimales}f}".replace(".", ",")
+
+
+def producto_foco(df):
+    """Producto sobre el que gira la historia: el interrogante con más peso en ventas."""
+    interrogantes = df[df["cuadrante"] == "Interrogante"]
+    candidatos = interrogantes if not interrogantes.empty else df
+    return candidatos.loc[candidatos["peso_cartera_%"].idxmax()]
+
+
+def dibujar(df):
+    plt.rcParams["font.family"] = ["Arial", "DejaVu Sans"]
+    foco = producto_foco(df)
+
+    fig, ax = plt.subplots(figsize=(11, 7.5))
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.80, bottom=0.12)
 
     x_max = max(df["cuota_relativa"].max() * 1.2, 2 * UMBRAL_CUOTA)
     y_min = min(df["crecimiento_%"].min() - 10, -10)
     y_max = df["crecimiento_%"].max() + 15
 
-    # Líneas divisorias
-    ax.axvline(UMBRAL_CUOTA, color="grey", lw=1.5)
-    ax.axhline(UMBRAL_CRECIMIENTO, color="grey", lw=1.5)
+    # 1. Eliminar el desorden: sin rejilla, sin marco superior/derecho, ejes en gris
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+    for lado in ("left", "bottom"):
+        ax.spines[lado].set_color(GRIS)
+    ax.tick_params(colors=GRIS_TEXTO, labelsize=10, length=0, pad=6)
+    ax.yaxis.set_major_formatter(lambda v, _: f"{v:+.0f} %".replace("+0", "0"))
+    ax.xaxis.set_major_formatter(lambda v, _: coma(v))
 
-    # Etiquetas de cuadrantes (convención BCG: cuota alta a la izquierda)
-    etiqueta = dict(fontsize=15, alpha=0.3, weight="bold")
-    ax.text(x_max * 0.98, y_max - 2, "ESTRELLA ★", ha="left", va="top", **etiqueta)
-    ax.text(0.02, y_max - 2, "INTERROGANTE ?", ha="right", va="top", **etiqueta)
-    ax.text(x_max * 0.98, y_min + 2, "VACA LECHERA $", ha="left", va="bottom", **etiqueta)
-    ax.text(0.02, y_min + 2, "PERRO ✕", ha="right", va="bottom", **etiqueta)
+    # Divisiones de la matriz, discretas
+    ax.axvline(UMBRAL_CUOTA, color=GRIS_CLARO, lw=1, zorder=0)
+    ax.axhline(UMBRAL_CRECIMIENTO, color=GRIS_CLARO, lw=1, zorder=0)
 
-    # Burbujas: tamaño proporcional a las ventas de la empresa
+    # Nombres de cuadrante en gris, sin competir con los datos
+    cuad = dict(fontsize=11, color=GRIS, weight="bold")
+    ax.text(x_max * 0.98, y_max, "ESTRELLAS", ha="left", va="top", **cuad)
+    ax.text(0.02, y_max, "INTERROGANTES", ha="right", va="top", **cuad)
+    ax.text(x_max * 0.98, y_min, "VACAS LECHERAS", ha="left", va="bottom", **cuad)
+    ax.text(0.02, y_min, "PERROS", ha="right", va="bottom", **cuad)
+
+    # 2. Todo en gris; solo el producto foco en color
     for _, f in df.iterrows():
+        es_foco = f["producto"] == foco["producto"]
         area = f["peso_cartera_%"] * 80 + 150
         radio = area ** 0.5 / 2  # en puntos
         ax.scatter(f["cuota_relativa"], f["crecimiento_%"], s=area,
-                   color=colores[f["cuadrante"]], alpha=0.7, edgecolors="black")
-        ax.annotate(f"{f['producto']}\n(CR {f['cuota_relativa']:.2f} | TCM {f['crecimiento_%']:.1f}%)",
-                    (f["cuota_relativa"], f["crecimiento_%"]),
-                    textcoords="offset points", xytext=(radio + 6, 0),
-                    ha="left", va="center", fontsize=8.5)
+                   color=COLOR_FOCO if es_foco else GRIS,
+                   edgecolors="white", linewidths=1.5, zorder=3 if es_foco else 2)
 
-    ax.set_xlim(x_max, 0)  # eje invertido: mayor cuota a la izquierda
-    ax.set_ylim(y_min, y_max)
-    ax.set_xlabel("Cuota de mercado relativa")
-    ax.set_ylabel("Tasa de crecimiento del mercado (%)")
-    ax.set_title("Matriz BCG – Cartera de productos")
-    ax.grid(alpha=0.2)
+        # 3. Etiquetado directo (sin leyenda)
+        if es_foco:
+            texto = (f"{f['producto']}\n"
+                     f"Cuota {coma(f['cuota_relativa'], 2)} · Mercado {f['crecimiento_%']:+.1f} %".replace(".", ","))
+            ax.annotate(texto, (f["cuota_relativa"], f["crecimiento_%"]),
+                        textcoords="offset points", xytext=(radio + 8, 0),
+                        ha="left", va="center", fontsize=10.5, color=COLOR_FOCO,
+                        weight="bold", linespacing=1.5,
+                        bbox=dict(facecolor="white", edgecolor="none", pad=2))
+        else:
+            ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
+                        textcoords="offset points", xytext=(radio + 6, 0),
+                        ha="left", va="center", fontsize=9.5, color=GRIS_TEXTO)
 
-    fig.tight_layout()
+    ax.set_xlim(x_max, 0)  # convención BCG: mayor cuota a la izquierda
+    ax.set_ylim(y_min - 3, y_max + 3)
+
+    # Títulos de eje alineados arriba/izquierda para leerlos primero
+    ax.set_xlabel("Cuota de mercado relativa", loc="left", color=GRIS_TEXTO, fontsize=10)
+    ax.set_ylabel("Crecimiento del mercado", loc="top", color=GRIS_TEXTO, fontsize=10)
+
+    # 4. Título que cuenta la conclusión, alineado a la izquierda
+    if foco["cuadrante"] == "Interrogante":
+        titulo = f"{foco['producto']} necesita una decisión de inversión"
+        subtitulo = (f"Su mercado crece un {coma(foco['crecimiento_%'])} %, pero vendemos menos que el "
+                     f"principal competidor. Supone el {coma(foco['peso_cartera_%'], 0)} % de nuestras ventas:\n"
+                     "si ganamos cuota puede ser una estrella; si no, acabará como perro.")
+    else:
+        titulo = "Matriz BCG de la cartera de productos"
+        subtitulo = ""
+    fig.text(0.08, 0.95, titulo, fontsize=17, color=GRIS_OSCURO, weight="bold", ha="left", va="top")
+    fig.text(0.08, 0.895, subtitulo, fontsize=11, color=GRIS_TEXTO, ha="left", va="top", linespacing=1.5)
+    fig.text(0.08, 0.025, "Fuente: matrizbcg.xlsx", fontsize=8.5, color=GRIS, ha="left")
+
     fig.savefig(SALIDA, dpi=150)
     print(f"\nGráfico guardado en: {SALIDA}")
     plt.show()
