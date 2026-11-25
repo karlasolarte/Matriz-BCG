@@ -24,8 +24,11 @@ if sys.platform == "darwin" and os.environ.get("MPLBACKEND", "").lower() not in 
 import matplotlib.pyplot as plt
 import openpyxl
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.transforms import Bbox
+from PIL import Image, ImageDraw, ImageFont
 
 EXCEL = Path(__file__).with_name("matrizbcgdatos.xlsx")  # el Excel va junto al script
 SALIDA = Path(__file__).with_name("matriz_bcg_verificada.png")
@@ -37,6 +40,31 @@ TOTAL_ESPERADO = 1_275_000
 
 COLORES = {"Estrella": "#f2b705", "Interrogante": "#2a7de1",
            "Vaca lechera": "#2e9e5b", "Perro": "#c0392b"}
+
+
+# Icono de cada cuadrante (emoji) y su alternativa si no hay fuente de emojis
+FUENTE_EMOJI = "/System/Library/Fonts/Apple Color Emoji.ttc"
+ICONOS = {"Estrella": ("⭐", "★"), "Interrogante": ("❓", "?"),
+          "Vaca lechera": ("🐄", "$"), "Perro": ("🐕", "✕")}
+
+
+def emoji_como_imagen(emoji):
+    """Dibuja un emoji en color como imagen (matplotlib no sabe pintarlos como texto)."""
+    fuente = ImageFont.truetype(FUENTE_EMOJI, 160)
+    lienzo = Image.new("RGBA", (180, 180), (0, 0, 0, 0))
+    ImageDraw.Draw(lienzo).text((0, 0), emoji, font=fuente, embedded_color=True)
+    return np.asarray(lienzo.crop(lienzo.getbbox()))
+
+
+def poner_icono(ax, cuadrante, x, y, ha, va):
+    """Coloca el icono del cuadrante en la esquina indicada."""
+    emoji, alternativo = ICONOS[cuadrante]
+    try:
+        imagen = OffsetImage(emoji_como_imagen(emoji), zoom=0.22)
+        caja = (0 if ha == "left" else 1, 1 if va == "top" else 0)
+        ax.add_artist(AnnotationBbox(imagen, (x, y), box_alignment=caja, frameon=False))
+    except OSError:  # sin fuente de emojis (p. ej. Windows): símbolo de texto
+        ax.text(x, y, alternativo, ha=ha, va=va, fontsize=20, weight="bold", color=COLORES[cuadrante])
 
 
 # ---------- Formato europeo ----------
@@ -124,12 +152,11 @@ def dibujar(df):
     ax.axvline(UMBRAL_CUOTA, color="#BFBFBF", lw=1, zorder=0)
     ax.axhline(UMBRAL_CRECIMIENTO, color="#BFBFBF", lw=1, zorder=0)
 
-    # Nombres de los cuadrantes (eje X invertido: más cuota a la izquierda)
-    estilo = dict(fontsize=12, weight="bold", alpha=0.6)
-    ax.text(x_max * 0.98, y_max * 0.97, "ESTRELLA", ha="left", va="top", color=COLORES["Estrella"], **estilo)
-    ax.text(0.02, y_max * 0.97, "INTERROGANTE", ha="right", va="top", color=COLORES["Interrogante"], **estilo)
-    ax.text(x_max * 0.98, y_min * 0.97, "VACA LECHERA", ha="left", va="bottom", color=COLORES["Vaca lechera"], **estilo)
-    ax.text(0.02, y_min * 0.97, "PERRO", ha="right", va="bottom", color=COLORES["Perro"], **estilo)
+    # Icono de cada cuadrante en su esquina (eje X invertido: más cuota a la izquierda)
+    poner_icono(ax, "Estrella", x_max * 0.98, y_max * 0.97, "left", "top")
+    poner_icono(ax, "Interrogante", 0.02, y_max * 0.97, "right", "top")
+    poner_icono(ax, "Vaca lechera", x_max * 0.98, y_min * 0.97, "left", "bottom")
+    poner_icono(ax, "Perro", 0.02, y_min * 0.97, "right", "bottom")
 
     # Círculos: el ÁREA es proporcional a la proporción en la cartera
     escala = 9000  # puntos² para el 100 % de la cartera
@@ -151,7 +178,7 @@ def dibujar(df):
     ax.set_ylim(y_min, y_max)
     ax.xaxis.set_major_formatter(lambda v, _: decimal(v, 1))
     ax.yaxis.set_major_formatter(lambda v, _: porcentaje(v, 0))
-    ax.set_xlabel("Cuota de mercado relativa (frente al principal competidor)", color="#595959")
+    ax.set_xlabel("Cuota de mercado relativa", color="#595959")
     ax.set_ylabel("Tasa de crecimiento del mercado", color="#595959")
     for lado in ("top", "right"):
         ax.spines[lado].set_visible(False)
@@ -347,8 +374,8 @@ async function ajustarNombres() {
     'xaxis.title.text': movil ? 'Cuota de mercado relativa' : tituloX,
     'xaxis.tickfont.size': movil ? 10 : 12, 'yaxis.tickfont.size': movil ? 10 : 12,
     'xaxis.title.font.size': movil ? 11 : 13, 'yaxis.title.font.size': movil ? 11 : 13,
-    'annotations[0].font.size': movil ? 11 : 15, 'annotations[1].font.size': movil ? 11 : 15,
-    'annotations[2].font.size': movil ? 11 : 15, 'annotations[3].font.size': movil ? 11 : 15,
+    'annotations[0].font.size': movil ? 24 : 34, 'annotations[1].font.size': movil ? 24 : 34,
+    'annotations[2].font.size': movil ? 24 : 34, 'annotations[3].font.size': movil ? 24 : 34,
   });
 
   const n = originales.length;
@@ -407,21 +434,19 @@ def crear_web(df):
     fig.add_vline(x=UMBRAL_CUOTA, line=linea, layer="below")
     fig.add_hline(y=UMBRAL_CRECIMIENTO, line=linea, layer="below")
 
-    # Nombres de los cuadrantes (eje X invertido: más cuota a la izquierda)
-    for texto, x, y, xa, ya in [("ESTRELLA", 0.01, 0.99, "left", "top"),
-                                ("INTERROGANTE", 0.99, 0.99, "right", "top"),
-                                ("VACA LECHERA", 0.01, 0.01, "left", "bottom"),
-                                ("PERRO", 0.99, 0.01, "right", "bottom")]:
-        clave = texto.capitalize() if texto != "VACA LECHERA" else "Vaca lechera"
-        fig.add_annotation(text=f"<b>{texto}</b>", x=x, y=y, xref="paper", yref="paper",
-                           xanchor=xa, yanchor=ya, showarrow=False, opacity=0.6,
-                           font=dict(size=15, color=COLORES[clave]))
+    # Icono de cada cuadrante en su esquina (eje X invertido: más cuota a la izquierda)
+    for cuadrante, x, y, xa, ya in [("Estrella", 0.01, 0.99, "left", "top"),
+                                    ("Interrogante", 0.99, 0.99, "right", "top"),
+                                    ("Vaca lechera", 0.01, 0.01, "left", "bottom"),
+                                    ("Perro", 0.99, 0.01, "right", "bottom")]:
+        fig.add_annotation(text=ICONOS[cuadrante][0], x=x, y=y, xref="paper", yref="paper",
+                           xanchor=xa, yanchor=ya, showarrow=False, font=dict(size=34))
 
     eje = dict(showgrid=False, zeroline=False, showline=True, linecolor="#BFBFBF", ticks="",
                tickfont=dict(color="#7F7F7F", size=12), title_font=dict(color="#595959", size=13))
     marcas_x = [i * 0.5 for i in range(int(x_max / 0.5) + 1)]
     marcas_y = [i / 5 for i in range(int(y_min * 5), int(y_max * 5) + 1)]
-    fig.update_xaxes(range=[x_max, 0], title="Cuota de mercado relativa (frente al principal competidor)",
+    fig.update_xaxes(range=[x_max, 0], title="Cuota de mercado relativa",
                      tickvals=marcas_x, ticktext=[decimal(v, 1) for v in marcas_x], **eje)
     fig.update_yaxes(range=[y_min, y_max], title="Tasa de crecimiento del mercado",
                      tickvals=marcas_y, ticktext=[porcentaje(v, 0) for v in marcas_y], **eje)
