@@ -24,10 +24,12 @@ if sys.platform == "darwin" and os.environ.get("MPLBACKEND", "").lower() not in 
 import matplotlib.pyplot as plt
 import openpyxl
 import pandas as pd
+import plotly.graph_objects as go
 from matplotlib.transforms import Bbox
 
 EXCEL = Path(__file__).with_name("matrizbcgdatos.xlsx")  # el Excel va junto al script
 SALIDA = Path(__file__).with_name("matriz_bcg_verificada.png")
+SALIDA_WEB = Path(__file__).with_name("docs") / "index.html"  # publicada en GitHub Pages
 
 UMBRAL_CRECIMIENTO = 0.10  # 10 %
 UMBRAL_CUOTA = 1.0
@@ -243,10 +245,133 @@ def activar_hover(fig, ax, circulos, nombres):
     fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
+# ---------- Página web (GitHub Pages) ----------
+# Cuadro de datos al pasar el ratón. Mide dónde están los nombres y los círculos en
+# la pantalla de quien lo mira y elige la posición que no tape ningún nombre.
+TOOLTIP_JS = """
+const grafico = document.getElementById('{plot_id}');
+const contenedor = grafico.parentElement;
+const caja = document.createElement('div');
+caja.style.cssText = 'position:absolute;display:none;pointer-events:none;background:white;'
+  + 'border:1.5px solid;border-radius:6px;padding:6px 10px;font:13px Arial,Helvetica,sans-serif;'
+  + 'color:#7F7F7F;line-height:1.5;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.12);z-index:10';
+contenedor.style.position = 'relative';
+contenedor.appendChild(caja);
+
+const solape = (a, b) =>
+  Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+
+function rectangulos(selector) {
+  const base = contenedor.getBoundingClientRect();
+  return [...grafico.querySelectorAll(selector)].map((el) => {
+    const r = el.getBoundingClientRect();
+    return {l: r.left - base.left, t: r.top - base.top, r: r.right - base.left, b: r.bottom - base.top};
+  });
+}
+
+grafico.on('plotly_hover', (e) => {
+  const p = e.points[0];
+  const [ventas, proporcion, color] = p.customdata;
+  caja.innerHTML = `Ventas: ${ventas} €<br>Proporción de la cartera: ${proporcion}`;
+  caja.style.borderColor = color;
+  caja.style.display = 'block';
+
+  const nombres = rectangulos('.textpoint text');
+  const circulos = rectangulos('.point');
+  const c = circulos[p.pointIndex];
+  const x = (c.l + c.r) / 2, y = (c.t + c.b) / 2, radio = (c.r - c.l) / 2;
+  const w = caja.offsetWidth, h = caja.offsetHeight, sep = 10;
+  const W = contenedor.clientWidth, H = contenedor.clientHeight;
+  const nombre = nombres[p.pointIndex];
+
+  // Posiciones candidatas, en orden de preferencia
+  const candidatas = [
+    [x - radio - sep - w, y - h / 2],          // a la izquierda del círculo
+    [x - w / 2, y - radio - sep - h],          // encima
+    [x - w / 2, y + radio + sep],              // debajo
+    [x - radio - sep - w, y - radio - sep - h],// arriba a la izquierda
+    [x - radio - sep - w, y + radio + sep],    // abajo a la izquierda
+    [nombre.r + sep, y - h / 2],               // a la derecha del nombre
+  ];
+  let mejor = null;
+  candidatas.forEach(([l, t], orden) => {
+    l = Math.min(Math.max(l, 0), W - w);
+    t = Math.min(Math.max(t, 0), H - h);
+    const r = {l, t, r: l + w, b: t + h};
+    let coste = orden;  // a igualdad, la más preferida
+    nombres.forEach((n) => { coste += solape(r, n) * 100; });
+    circulos.forEach((k) => { coste += solape(r, k); });
+    if (!mejor || coste < mejor.coste) mejor = {l, t, coste};
+  });
+  caja.style.left = mejor.l + 'px';
+  caja.style.top = mejor.t + 'px';
+});
+grafico.on('plotly_unhover', () => { caja.style.display = 'none'; });
+"""
+
+
+def crear_web(df):
+    """Versión web del mismo gráfico, con hover en el navegador."""
+    x_max = max(df["cuota"].max() * 1.25, 2 * UMBRAL_CUOTA)
+    y_min = min(df["crecimiento"].min() - 0.10, -0.10)
+    y_max = df["crecimiento"].max() + 0.15
+    colores = [COLORES[q] for q in df["posicion"]]
+    # Mismo tamaño que en matplotlib: área proporcional a la proporción de la cartera
+    diametros = [max(prop * 9000, 40) ** 0.5 * 1.33 for prop in df["proporcion"]]
+
+    fig = go.Figure(go.Scatter(
+        x=df["cuota"].tolist(), y=df["crecimiento"].tolist(),
+        mode="markers+text", text=df["producto"].tolist(), textposition="middle right",
+        textfont=dict(color="#595959", size=13, weight="bold"),
+        marker=dict(size=diametros, sizemode="diameter", color=colores, opacity=0.85,
+                    line=dict(color="white", width=1.5)),
+        hoverinfo="none",  # el cuadro lo pinta TOOLTIP_JS
+        customdata=[[miles(v), porcentaje(p), c]
+                    for v, p, c in zip(df["ventas_empresa"], df["proporcion"], colores)],
+    ))
+
+    linea = dict(color="#BFBFBF", width=1)
+    fig.add_vline(x=UMBRAL_CUOTA, line=linea, layer="below")
+    fig.add_hline(y=UMBRAL_CRECIMIENTO, line=linea, layer="below")
+
+    # Nombres de los cuadrantes (eje X invertido: más cuota a la izquierda)
+    for texto, x, y, xa, ya in [("ESTRELLA", 0.01, 0.99, "left", "top"),
+                                ("INTERROGANTE", 0.99, 0.99, "right", "top"),
+                                ("VACA LECHERA", 0.01, 0.01, "left", "bottom"),
+                                ("PERRO", 0.99, 0.01, "right", "bottom")]:
+        clave = texto.capitalize() if texto != "VACA LECHERA" else "Vaca lechera"
+        fig.add_annotation(text=f"<b>{texto}</b>", x=x, y=y, xref="paper", yref="paper",
+                           xanchor=xa, yanchor=ya, showarrow=False, opacity=0.6,
+                           font=dict(size=15, color=COLORES[clave]))
+
+    eje = dict(showgrid=False, zeroline=False, showline=True, linecolor="#BFBFBF", ticks="",
+               tickfont=dict(color="#7F7F7F", size=12), title_font=dict(color="#595959", size=13))
+    marcas_x = [i * 0.5 for i in range(int(x_max / 0.5) + 1)]
+    marcas_y = [i / 5 for i in range(int(y_min * 5), int(y_max * 5) + 1)]
+    fig.update_xaxes(range=[x_max, 0], title="Cuota de mercado relativa (frente al principal competidor)",
+                     tickvals=marcas_x, ticktext=[decimal(v, 1) for v in marcas_x], **eje)
+    fig.update_yaxes(range=[y_min, y_max], title="Tasa de crecimiento del mercado",
+                     tickvals=marcas_y, ticktext=[porcentaje(v, 0) for v in marcas_y], **eje)
+    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
+                      font=dict(family="Arial, Helvetica, sans-serif"),
+                      margin=dict(l=70, r=40, t=30, b=60), hovermode="closest")
+
+    SALIDA_WEB.parent.mkdir(exist_ok=True)
+    fig.write_html(SALIDA_WEB, include_plotlyjs="cdn", full_html=True,
+                   config={"displayModeBar": False, "responsive": True},
+                   default_width="100%", default_height="95vh", post_script=TOOLTIP_JS)
+    html = SALIDA_WEB.read_text(encoding="utf-8")
+    html = html.replace("<head>", '<head><meta charset="utf-8"><title>Matriz BCG</title>'
+                        '<meta name="viewport" content="width=device-width, initial-scale=1">', 1)
+    SALIDA_WEB.write_text(html, encoding="utf-8")
+    print(f"Página web guardada en: {SALIDA_WEB}")
+
+
 def main():
     df, total = cargar_y_calcular()
     imprimir_tabla(df, total)
     comparar_con_excel(df)
+    crear_web(df)
     dibujar(df)
 
 
