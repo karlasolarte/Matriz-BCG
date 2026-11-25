@@ -45,7 +45,10 @@ GRIS_CLARO = "#D9D9D9"
 GRIS = "#BFBFBF"
 GRIS_TEXTO = "#7F7F7F"
 GRIS_OSCURO = "#404040"
-COLOR_FOCO = "#1F5FA6"
+
+# Color de cada círculo según su cuadrante
+COLORES_CUADRANTE = {"Estrella": "#f2b705", "Interrogante": "#2a7de1",
+                     "Vaca": "#2e9e5b", "Perro": "#c0392b"}
 
 
 def coma(valor, decimales=1):
@@ -91,24 +94,25 @@ def dibujar(df):
     ax.text(x_max * 0.98, y_min, "VACAS LECHERAS", ha="left", va="bottom", **cuad)
     ax.text(0.02, y_min, "PERROS", ha="right", va="bottom", **cuad)
 
-    # 2. Todo en gris; solo el producto foco en color
+    # 2. Círculos con el color de su cuadrante
     for _, f in df.iterrows():
         es_foco = f["producto"] == foco["producto"]
         area = f["peso_cartera_%"] * 80 + 150
         radio = area ** 0.5 / 2  # en puntos
         ax.scatter(f["cuota_relativa"], f["crecimiento_%"], s=area,
-                   color=COLOR_FOCO if es_foco else GRIS,
+                   color=COLORES_CUADRANTE[f["cuadrante"]], alpha=0.85,
                    edgecolors="white", linewidths=1.5, zorder=3 if es_foco else 2)
 
         # 3. Etiquetado directo (sin leyenda)
         if es_foco:
             texto = (f"{f['producto']}\n"
                      f"Cuota {coma(f['cuota_relativa'], 2)} · Mercado {f['crecimiento_%']:+.1f} %".replace(".", ","))
-            ax.annotate(texto, (f["cuota_relativa"], f["crecimiento_%"]),
-                        textcoords="offset points", xytext=(radio + 8, 0),
-                        ha="left", va="center", fontsize=10.5, color=COLOR_FOCO,
-                        weight="bold", linespacing=1.5,
-                        bbox=dict(facecolor="white", edgecolor="none", pad=2))
+            # Se apoya en la línea divisoria, dentro de su cuadrante, para que no la cruce
+            arriba = f["crecimiento_%"] >= UMBRAL_CRECIMIENTO
+            ax.annotate(texto, (f["cuota_relativa"], UMBRAL_CRECIMIENTO),
+                        textcoords="offset points", xytext=(radio + 8, 5 if arriba else -5),
+                        ha="left", va="bottom" if arriba else "top",
+                        fontsize=10.5, color=COLORES_CUADRANTE[f["cuadrante"]], weight="bold", linespacing=1.5)
         else:
             ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
                         textcoords="offset points", xytext=(radio + 6, 0),
