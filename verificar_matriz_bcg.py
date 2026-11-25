@@ -310,6 +310,79 @@ grafico.on('plotly_unhover', () => { caja.style.display = 'none'; });
 """
 
 
+# Que nada se corte en pantallas estrechas (móvil). Los nombres deben caber dentro
+# de la zona del gráfico: si uno se sale por la derecha se pone a la izquierda de
+# su círculo y, si aun así no cabe, se parte en dos líneas. En pantallas pequeñas
+# también se reducen las letras, los márgenes y el título del eje horizontal.
+NOMBRES_JS = """
+const grafico = document.getElementById('{plot_id}');
+const contenedor = grafico.parentElement;
+const originales = grafico.data[0].text.slice();
+const tituloX = grafico.layout.xaxis.title.text;
+
+function partir(nombre) {
+  const palabras = nombre.split(' ');
+  const mitad = Math.ceil(palabras.length / 2);
+  return palabras.slice(0, mitad).join(' ') + '<br>' + palabras.slice(mitad).join(' ');
+}
+
+function medir() {
+  const base = contenedor.getBoundingClientRect();
+  const zona = grafico.querySelector('.nsewdrag').getBoundingClientRect();
+  const nombres = [...grafico.querySelectorAll('.textpoint text')].map((el) => {
+    const r = el.getBoundingClientRect();
+    return {l: r.left - base.left, r: r.right - base.left};
+  });
+  return {nombres, L: zona.left - base.left, R: zona.right - base.left};
+}
+
+let ajustando = false;
+async function ajustarNombres() {
+  if (ajustando) return;
+  ajustando = true;
+  const ancho = contenedor.clientWidth;
+  const movil = ancho < 600;
+  await Plotly.relayout(grafico, {
+    'margin.l': movil ? 50 : 70, 'margin.r': movil ? 10 : 40,
+    'xaxis.title.text': movil ? 'Cuota de mercado relativa' : tituloX,
+    'xaxis.tickfont.size': movil ? 10 : 12, 'yaxis.tickfont.size': movil ? 10 : 12,
+    'xaxis.title.font.size': movil ? 11 : 13, 'yaxis.title.font.size': movil ? 11 : 13,
+    'annotations[0].font.size': movil ? 11 : 15, 'annotations[1].font.size': movil ? 11 : 15,
+    'annotations[2].font.size': movil ? 11 : 15, 'annotations[3].font.size': movil ? 11 : 15,
+  });
+
+  const n = originales.length;
+  const posiciones = Array(n).fill('middle right');
+  const textos = originales.slice();
+  await Plotly.restyle(grafico, {'textfont.size': movil ? 10 : ancho < 900 ? 11.5 : 13,
+                                 textposition: [posiciones], text: [textos]});
+
+  let m = medir();
+  let cambios = false;
+  m.nombres.forEach((b, i) => { if (b.r > m.R) { posiciones[i] = 'middle left'; cambios = true; } });
+  if (cambios) await Plotly.restyle(grafico, {textposition: [posiciones]});
+
+  m = medir();
+  cambios = false;
+  m.nombres.forEach((b, i) => { if (b.l < m.L || b.r > m.R) { textos[i] = partir(originales[i]); cambios = true; } });
+  if (cambios) await Plotly.restyle(grafico, {text: [textos]});
+
+  // Tras partir en dos líneas, comprobar de nuevo el lado
+  m = medir();
+  cambios = false;
+  m.nombres.forEach((b, i) => {
+    if (b.r > m.R && posiciones[i] === 'middle right') { posiciones[i] = 'middle left'; cambios = true; }
+    else if (b.l < m.L && posiciones[i] === 'middle left') { posiciones[i] = 'middle right'; cambios = true; }
+  });
+  if (cambios) await Plotly.restyle(grafico, {textposition: [posiciones]});
+  ajustando = false;
+}
+
+ajustarNombres();
+let espera;
+window.addEventListener('resize', () => { clearTimeout(espera); espera = setTimeout(ajustarNombres, 250); });
+"""
+
 def crear_web(df):
     """Versión web del mismo gráfico, con hover en el navegador."""
     x_max = max(df["cuota"].max() * 1.25, 2 * UMBRAL_CUOTA)
@@ -359,7 +432,7 @@ def crear_web(df):
     SALIDA_WEB.parent.mkdir(exist_ok=True)
     fig.write_html(SALIDA_WEB, include_plotlyjs="cdn", full_html=True,
                    config={"displayModeBar": False, "responsive": True},
-                   default_width="100%", default_height="95vh", post_script=TOOLTIP_JS)
+                   default_width="100%", default_height="95vh", post_script=[TOOLTIP_JS, NOMBRES_JS])
     html = SALIDA_WEB.read_text(encoding="utf-8")
     html = html.replace("<head>", '<head><meta charset="utf-8"><title>Matriz BCG</title>'
                         '<meta name="viewport" content="width=device-width, initial-scale=1">', 1)
