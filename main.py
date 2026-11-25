@@ -74,7 +74,7 @@ def dibujar(df):
 
     ax.set_xlim(x_max, 0)  # eje invertido: mayor cuota a la izquierda
     ax.set_ylim(y_min, y_max)
-    ax.set_xlabel("Cuota de mercado relativa (ventas empresa / ventas principal competidor)")
+    ax.set_xlabel("Cuota de mercado relativa")
     ax.set_ylabel("Tasa de crecimiento del mercado (%)")
     ax.set_title("Matriz BCG – Cartera de productos\n(tamaño de burbuja = peso en las ventas de la empresa)")
     ax.grid(alpha=0.2)
