@@ -196,6 +196,43 @@ def activar_hover(fig, ax, circulos):
     fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
+# Cuadro de datos al pasar el ratón: se coloca a la izquierda del círculo (los
+# nombres van a la derecha); si no cabe, encima, y si tampoco, debajo.
+TOOLTIP_JS = """
+const grafico = document.getElementById('{plot_id}');
+const caja = document.createElement('div');
+caja.style.cssText = 'position:absolute;display:none;pointer-events:none;background:white;'
+  + 'border:1.5px solid;border-radius:6px;padding:6px 10px;font:13px Arial,Helvetica,sans-serif;'
+  + 'color:#7F7F7F;line-height:1.5;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.12);z-index:10';
+grafico.parentElement.style.position = 'relative';
+grafico.parentElement.appendChild(caja);
+
+grafico.on('plotly_hover', (e) => {
+  const p = e.points[0];
+  const [cuota, crecimiento, color] = p.customdata;
+  const x = p.xaxis.l2p(p.x) + p.xaxis._offset + grafico.offsetLeft;
+  const y = p.yaxis.l2p(p.y) + p.yaxis._offset + grafico.offsetTop;
+  const radio = p.data.marker.size[p.pointIndex] / 2;
+  caja.innerHTML = `Cuota de mercado relativa: ${cuota}<br>Crecimiento del mercado: ${crecimiento} %`;
+  caja.style.borderColor = color;
+  caja.style.display = 'block';
+  const ancho = caja.offsetWidth, alto = caja.offsetHeight;
+  const izquierda = x - radio - 10 - ancho;
+  let left, top;
+  if (izquierda >= p.xaxis._offset + grafico.offsetLeft) {
+    left = izquierda;
+    top = y - alto / 2;
+  } else {
+    left = Math.min(Math.max(x - ancho / 2, 0), grafico.parentElement.clientWidth - ancho);
+    top = (y - radio - 10 - alto >= 0) ? y - radio - 10 - alto : y + radio + 10;
+  }
+  caja.style.left = left + 'px';
+  caja.style.top = top + 'px';
+});
+grafico.on('plotly_unhover', () => { caja.style.display = 'none'; });
+"""
+
+
 def crear_web(df):
     """Versión web interactiva del mismo gráfico (hover en el navegador)."""
     x_max = max(df["cuota_relativa"].max() * 1.2, 2 * UMBRAL_CUOTA)
@@ -203,17 +240,16 @@ def crear_web(df):
     y_max = df["crecimiento_%"].max() + 15
 
     fig = go.Figure(go.Scatter(
-        x=df["cuota_relativa"], y=df["crecimiento_%"],
+        x=df["cuota_relativa"].tolist(), y=df["crecimiento_%"].tolist(),
         mode="markers+text", text=df["producto"], textposition="middle right",
         textfont=dict(color=GRIS_TEXTO, size=13, weight="bold"),
-        marker=dict(size=(df["peso_cartera_%"] * 80 + 150) ** 0.5 * 1.33, sizemode="diameter",
+        marker=dict(size=((df["peso_cartera_%"] * 80 + 150) ** 0.5 * 1.33).tolist(), sizemode="diameter",
                     color=[COLORES_CUADRANTE[c] for c in df["cuadrante"]], opacity=0.85,
                     line=dict(color="white", width=1.5)),
-        customdata=[[coma(c, 2), coma(g)] for c, g in zip(df["cuota_relativa"], df["crecimiento_%"])],
-        hovertemplate=("Cuota de mercado relativa: %{customdata[0]}<br>"
-                       "Crecimiento del mercado: %{customdata[1]} %<extra></extra>"),
-        hoverlabel=dict(bgcolor="white", bordercolor=[COLORES_CUADRANTE[c] for c in df["cuadrante"]],
-                        font=dict(color=GRIS_TEXTO, size=13)),
+        # El hover lo pinta TOOLTIP_JS (encima del círculo) para no tapar los nombres
+        hoverinfo="none",
+        customdata=[[coma(c, 2), coma(g), COLORES_CUADRANTE[q]]
+                    for c, g, q in zip(df["cuota_relativa"], df["crecimiento_%"], df["cuadrante"])],
     ))
 
     # Líneas divisorias de la matriz
@@ -232,9 +268,9 @@ def crear_web(df):
     marcas_x = np.arange(0, x_max + 0.01, 0.5)
     marcas_y = np.arange(np.ceil(y_min / 20) * 20, y_max + 0.01, 20)
     fig.update_xaxes(range=[x_max, 0], title="Cuota de mercado relativa",
-                     tickvals=marcas_x, ticktext=[coma(v) for v in marcas_x], **eje)
+                     tickvals=marcas_x.tolist(), ticktext=[coma(v) for v in marcas_x], **eje)
     fig.update_yaxes(range=[y_min - 3, y_max + 3], title="Crecimiento del mercado",
-                     tickvals=marcas_y, ticktext=[f"{v:+.0f} %".replace("+0", "0") for v in marcas_y], **eje)
+                     tickvals=marcas_y.tolist(), ticktext=[f"{v:+.0f} %".replace("+0", "0") for v in marcas_y], **eje)
     fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
                       font=dict(family="Arial, Helvetica, sans-serif"),
                       margin=dict(l=70, r=40, t=30, b=60), hovermode="closest")
@@ -242,7 +278,7 @@ def crear_web(df):
     SALIDA_WEB.parent.mkdir(exist_ok=True)
     fig.write_html(SALIDA_WEB, include_plotlyjs="cdn", full_html=True,
                    config={"displayModeBar": False, "responsive": True},
-                   default_width="100%", default_height="95vh")
+                   default_width="100%", default_height="95vh", post_script=TOOLTIP_JS)
     html = SALIDA_WEB.read_text(encoding="utf-8")
     html = html.replace("<head>", '<head><title>Matriz BCG</title>'
                         '<meta name="viewport" content="width=device-width, initial-scale=1">', 1)
