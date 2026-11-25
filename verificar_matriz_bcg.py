@@ -5,14 +5,26 @@
   de la cartera y la posición en la matriz, y las compara con las fórmulas del
   Excel (si el archivo se ha abierto y guardado en Excel/Numbers).
 - Dibuja la matriz con círculos proporcionales a la proporción de la cartera.
+  Cada círculo lleva el nombre del producto; sus ventas y su proporción en la
+  cartera aparecen al pasar el ratón por encima (en la ventana del gráfico).
 Todos los números se muestran en formato europeo (1.275.000 y coma decimal).
 """
 
+import os
+import sys
 from pathlib import Path
+
+import matplotlib
+
+# PyCharm muestra los gráficos como imagen fija; en Mac abrimos una ventana
+# real para que funcione el hover sobre los círculos.
+if sys.platform == "darwin" and os.environ.get("MPLBACKEND", "").lower() not in ("agg", "pdf", "svg"):
+    matplotlib.use("macosx")
 
 import matplotlib.pyplot as plt
 import openpyxl
 import pandas as pd
+from matplotlib.transforms import Bbox
 
 EXCEL = Path("/Users/karlasolarte/Andalucia FP/matrizbcgdatos.xlsx")
 SALIDA = Path(__file__).with_name("matriz_bcg_verificada.png")
@@ -119,17 +131,19 @@ def dibujar(df, total):
 
     # Círculos: el ÁREA es proporcional a la proporción en la cartera
     escala = 9000  # puntos² para el 100 % de la cartera
+    circulos, nombres = [], []
     for _, f in df.iterrows():
         area = max(f["proporcion"] * escala, 40)  # mínimo para que el más pequeño se vea
         radio = area ** 0.5 / 2
-        ax.scatter(f["cuota"], f["crecimiento"], s=area, color=COLORES[f["posicion"]],
-                   alpha=0.85, edgecolors="white", linewidths=1.5, zorder=2)
-        ax.annotate(f"{f['producto']}\n"
-                    f"{miles(f['ventas_empresa'])} € · {porcentaje(f['proporcion'])} de la cartera",
-                    (f["cuota"], f["crecimiento"]), textcoords="offset points",
-                    xytext=(radio + 6, 0), ha="left", va="center", fontsize=9.5,
-                    color="#595959", linespacing=1.4, zorder=3,
-                    bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1.5))
+        circulo = ax.scatter(f["cuota"], f["crecimiento"], s=area, color=COLORES[f["posicion"]],
+                             alpha=0.85, edgecolors="white", linewidths=1.5, zorder=2)
+        # Solo el nombre; los datos se ven al pasar el ratón
+        nombre = ax.annotate(f["producto"], (f["cuota"], f["crecimiento"]), textcoords="offset points",
+                             xytext=(radio + 6, 0), ha="left", va="center", fontsize=10,
+                             weight="bold", color="#595959", zorder=3,
+                             bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1.5))
+        circulos.append((circulo, f, radio))
+        nombres.append(nombre)
 
     ax.set_xlim(x_max, 0)
     ax.set_ylim(y_min, y_max)
@@ -148,7 +162,87 @@ def dibujar(df, total):
     fig.tight_layout()
     fig.savefig(SALIDA, dpi=150)
     print(f"\nGráfico guardado en: {SALIDA}")
+
+    activar_hover(fig, ax, circulos, nombres)
     plt.show()
+
+
+def activar_hover(fig, ax, circulos, nombres):
+    """Al pasar el ratón por un círculo muestra sus ventas y su proporción en la
+    cartera, en la posición libre más cercana que no tape ningún nombre."""
+    tamano_letra = 10
+    caja = ax.annotate("", xy=(0, 0), xycoords="figure pixels", ha="left", va="bottom",
+                       fontsize=tamano_letra, color="#595959", linespacing=1.5, zorder=10,
+                       annotation_clip=False,
+                       bbox=dict(boxstyle="round,pad=0.6", facecolor="white", edgecolor="#BFBFBF"))
+    caja.set_visible(False)
+
+    def solape(a, b):
+        return (max(0, min(a.x1, b.x1) - max(a.x0, b.x0)) *
+                max(0, min(a.y1, b.y1) - max(a.y0, b.y0)))
+
+    def al_mover(evento):
+        tocados = []
+        if evento.inaxes is ax:
+            tocados = [(c, f, r) for c, f, r in circulos if c.contains(evento)[0]]
+        if not tocados:
+            if caja.get_visible():
+                caja.set_visible(False)
+                fig.canvas.draw_idle()
+            return
+
+        # Si dos círculos se solapan, el más cercano al ratón
+        def distancia(t):
+            x, y = ax.transData.transform(t[0].get_offsets()[0])
+            return (x - evento.x) ** 2 + (y - evento.y) ** 2
+        circulo, f, radio_pt = min(tocados, key=distancia)
+
+        caja.set_text(f"Ventas: {miles(f['ventas_empresa'])} €\n"
+                      f"Proporción de la cartera: {porcentaje(f['proporcion'])}")
+        caja.get_bbox_patch().set_edgecolor(COLORES[f["posicion"]])
+        caja.set_visible(True)  # oculta, matplotlib la mediría con tamaño cero
+
+        # Medidas en píxeles de pantalla
+        render = fig.canvas.get_renderer()
+        px = fig.dpi / 72
+        relleno = 0.6 * tamano_letra * px
+        texto = caja.get_window_extent(render)
+        w, h = texto.width + 2 * relleno, texto.height + 2 * relleno
+        cx, cy = ax.transData.transform((f["cuota"], f["crecimiento"]))
+        r, sep = radio_pt * px, 8 * px
+        zona = ax.get_window_extent(render)
+        textos = [n.get_window_extent(render) for n in nombres]
+        mi_nombre = textos[[t[1]["producto"] for t in circulos].index(f["producto"])]
+
+        # Posiciones candidatas (esquina inferior izquierda), en orden de preferencia
+        candidatas = [
+            (cx - r - sep - w, cy - h / 2),        # a la izquierda del círculo
+            (cx - w / 2, cy + r + sep),            # encima
+            (cx - w / 2, cy - r - sep - h),        # debajo
+            (cx - r - sep - w, cy + r + sep),      # arriba a la izquierda
+            (cx - r - sep - w, cy - r - sep - h),  # abajo a la izquierda
+            (mi_nombre.x1 + sep, cy - h / 2),      # a la derecha del nombre
+        ]
+        mejor = None
+        for orden, (x0, y0) in enumerate(candidatas):
+            x0 = min(max(x0, zona.x0), zona.x1 - w)
+            y0 = min(max(y0, zona.y0), zona.y1 - h)
+            rect = Bbox.from_bounds(x0, y0, w, h)
+            coste = orden + sum(solape(rect, t) for t in textos) * 100
+            for c, _, rr in circulos:
+                bx, by = ax.transData.transform(c.get_offsets()[0])
+                rr *= px
+                coste += solape(rect, Bbox.from_extents(bx - rr, by - rr, bx + rr, by + rr))
+            if mejor is None or coste < mejor[0]:
+                mejor = (coste, x0, y0)
+
+        _, x0, y0 = mejor
+        caja.xy = (x0 + relleno, y0 + relleno)
+        caja.set_position(caja.xy)
+        caja.set_visible(True)
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
 def main():
