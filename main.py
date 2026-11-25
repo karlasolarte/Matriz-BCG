@@ -1,6 +1,15 @@
 """Matriz de crecimiento-participación de la BCG a partir de matrizbcg.xlsx."""
 
+import os
+import sys
 from pathlib import Path
+
+import matplotlib
+
+# PyCharm muestra los gráficos como imagen fija; en Mac abrimos una ventana
+# real para que funcione el hover sobre los círculos.
+if sys.platform == "darwin" and os.environ.get("MPLBACKEND", "").lower() not in ("agg", "pdf", "svg"):
+    matplotlib.use("macosx")
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -113,12 +122,14 @@ def dibujar(df):
     poner_simbolo(ax, "Perro", 0.02, y_min, "right", "bottom")
 
     # 2. Círculos con el color de su cuadrante
+    circulos = []
     for _, f in df.iterrows():
         area = f["peso_cartera_%"] * 80 + 150
         radio = area ** 0.5 / 2  # en puntos
-        ax.scatter(f["cuota_relativa"], f["crecimiento_%"], s=area,
-                   color=COLORES_CUADRANTE[f["cuadrante"]], alpha=0.85,
-                   edgecolors="white", linewidths=1.5, zorder=2)
+        circulo = ax.scatter(f["cuota_relativa"], f["crecimiento_%"], s=area,
+                             color=COLORES_CUADRANTE[f["cuadrante"]], alpha=0.85,
+                             edgecolors="white", linewidths=1.5, zorder=2)
+        circulos.append((circulo, f))
 
         # 3. Etiquetado directo (sin leyenda)
         ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
@@ -132,10 +143,55 @@ def dibujar(df):
     ax.set_xlabel("Cuota de mercado relativa", loc="center", color=GRIS_TEXTO, fontsize=10)
     ax.set_ylabel("Crecimiento del mercado", loc="center", color=GRIS_TEXTO, fontsize=10)
 
-
     fig.savefig(SALIDA, dpi=150)
     print(f"\nGráfico guardado en: {SALIDA}")
+
+    activar_hover(fig, ax, circulos)
     plt.show()
+
+
+def texto_hover(f):
+    return (f"Cuota de mercado relativa: {coma(f['cuota_relativa'], 2)}\n"
+            f"Crecimiento del mercado: {coma(f['crecimiento_%'])} %")
+
+
+def activar_hover(fig, ax, circulos):
+    """Muestra los datos de un producto al pasar el ratón por su círculo."""
+    caja = ax.annotate("", xy=(0, 0), xytext=(15, 15), textcoords="offset points", fontsize=9.5,
+                       color=GRIS_TEXTO, linespacing=1.5, zorder=10, multialignment="left",
+                       bbox=dict(boxstyle="round,pad=0.6", facecolor="white", edgecolor=GRIS))
+    caja.set_visible(False)
+
+    def al_mover(evento):
+        if evento.inaxes is not ax:
+            tocados = []
+        else:
+            tocados = [(c, f) for c, f in circulos if c.contains(evento)[0]]
+        if not tocados:
+            if caja.get_visible():
+                caja.set_visible(False)
+                fig.canvas.draw_idle()
+            return
+
+        # Si dos círculos se solapan, el más cercano al ratón
+        def distancia(par):
+            x, y = ax.transData.transform(par[0].get_offsets()[0])
+            return (x - evento.x) ** 2 + (y - evento.y) ** 2
+        circulo, f = min(tocados, key=distancia)
+
+        # La caja se abre hacia el centro del gráfico para que no se salga
+        a_la_derecha = evento.x < fig.bbox.width / 2
+        arriba = evento.y < fig.bbox.height / 2
+        caja.xy = (f["cuota_relativa"], f["crecimiento_%"])
+        caja.set_position((15 if a_la_derecha else -15, 15 if arriba else -15))
+        caja.set_ha("left" if a_la_derecha else "right")
+        caja.set_va("bottom" if arriba else "top")
+        caja.set_text(texto_hover(f))
+        caja.get_bbox_patch().set_edgecolor(COLORES_CUADRANTE[f["cuadrante"]])
+        caja.set_visible(True)
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
 def main():
