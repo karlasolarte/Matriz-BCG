@@ -76,7 +76,7 @@ def dibujar(df):
     ax.set_ylim(y_min, y_max)
     ax.set_xlabel("Cuota de mercado relativa")
     ax.set_ylabel("Tasa de crecimiento del mercado (%)")
-    ax.set_title("Matriz BCG – Cartera de productos\n(tamaño de burbuja = peso en las ventas de la empresa)")
+    ax.set_title("Matriz BCG – Cartera de productos")
     ax.grid(alpha=0.2)
 
     fig.tight_layout()
