@@ -111,7 +111,7 @@ def imprimir_tabla(df, total):
 
 
 # ---------- Gráfico ----------
-def dibujar(df, total):
+def dibujar(df):
     plt.rcParams["font.family"] = ["Arial", "DejaVu Sans"]
     fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -151,8 +151,6 @@ def dibujar(df, total):
     ax.yaxis.set_major_formatter(lambda v, _: porcentaje(v, 0))
     ax.set_xlabel("Cuota de mercado relativa (frente al principal competidor)", color="#595959")
     ax.set_ylabel("Tasa de crecimiento del mercado", color="#595959")
-    ax.set_title(f"Matriz BCG · Ventas totales de la empresa: {miles(total)} €",
-                 loc="left", fontsize=14, weight="bold", color="#404040")
     for lado in ("top", "right"):
         ax.spines[lado].set_visible(False)
     for lado in ("left", "bottom"):
@@ -249,7 +247,7 @@ def main():
     df, total = cargar_y_calcular()
     imprimir_tabla(df, total)
     comparar_con_excel(df)
-    dibujar(df, total)
+    dibujar(df)
 
 
 if __name__ == "__main__":
