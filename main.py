@@ -196,38 +196,65 @@ def activar_hover(fig, ax, circulos):
     fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
-# Cuadro de datos al pasar el ratón: se coloca a la izquierda del círculo (los
-# nombres van a la derecha); si no cabe, encima, y si tampoco, debajo.
+# Cuadro de datos al pasar el ratón. Mide dónde están los nombres y los círculos en
+# la pantalla de quien lo mira y elige la posición que no tape ningún nombre.
 TOOLTIP_JS = """
 const grafico = document.getElementById('{plot_id}');
+const contenedor = grafico.parentElement;
 const caja = document.createElement('div');
 caja.style.cssText = 'position:absolute;display:none;pointer-events:none;background:white;'
   + 'border:1.5px solid;border-radius:6px;padding:6px 10px;font:13px Arial,Helvetica,sans-serif;'
   + 'color:#7F7F7F;line-height:1.5;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.12);z-index:10';
-grafico.parentElement.style.position = 'relative';
-grafico.parentElement.appendChild(caja);
+contenedor.style.position = 'relative';
+contenedor.appendChild(caja);
+
+const solape = (a, b) =>
+  Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+
+function rectangulos(selector) {
+  const base = contenedor.getBoundingClientRect();
+  return [...grafico.querySelectorAll(selector)].map((el) => {
+    const r = el.getBoundingClientRect();
+    return {l: r.left - base.left, t: r.top - base.top, r: r.right - base.left, b: r.bottom - base.top};
+  });
+}
 
 grafico.on('plotly_hover', (e) => {
   const p = e.points[0];
   const [cuota, crecimiento, color] = p.customdata;
-  const x = p.xaxis.l2p(p.x) + p.xaxis._offset + grafico.offsetLeft;
-  const y = p.yaxis.l2p(p.y) + p.yaxis._offset + grafico.offsetTop;
-  const radio = p.data.marker.size[p.pointIndex] / 2;
   caja.innerHTML = `Cuota de mercado relativa: ${cuota}<br>Crecimiento del mercado: ${crecimiento} %`;
   caja.style.borderColor = color;
   caja.style.display = 'block';
-  const ancho = caja.offsetWidth, alto = caja.offsetHeight;
-  const izquierda = x - radio - 10 - ancho;
-  let left, top;
-  if (izquierda >= p.xaxis._offset + grafico.offsetLeft) {
-    left = izquierda;
-    top = y - alto / 2;
-  } else {
-    left = Math.min(Math.max(x - ancho / 2, 0), grafico.parentElement.clientWidth - ancho);
-    top = (y - radio - 10 - alto >= 0) ? y - radio - 10 - alto : y + radio + 10;
-  }
-  caja.style.left = left + 'px';
-  caja.style.top = top + 'px';
+
+  const nombres = rectangulos('.textpoint text');
+  const circulos = rectangulos('.point');
+  const c = circulos[p.pointIndex];
+  const x = (c.l + c.r) / 2, y = (c.t + c.b) / 2, radio = (c.r - c.l) / 2;
+  const w = caja.offsetWidth, h = caja.offsetHeight, sep = 10;
+  const W = contenedor.clientWidth, H = contenedor.clientHeight;
+  const nombre = nombres[p.pointIndex];
+
+  // Posiciones candidatas, en orden de preferencia
+  const candidatas = [
+    [x - radio - sep - w, y - h / 2],          // a la izquierda del círculo
+    [x - w / 2, y - radio - sep - h],          // encima
+    [x - w / 2, y + radio + sep],              // debajo
+    [x - radio - sep - w, y - radio - sep - h],// arriba a la izquierda
+    [x - radio - sep - w, y + radio + sep],    // abajo a la izquierda
+    [nombre.r + sep, y - h / 2],               // a la derecha del nombre
+  ];
+  let mejor = null;
+  candidatas.forEach(([l, t], orden) => {
+    l = Math.min(Math.max(l, 0), W - w);
+    t = Math.min(Math.max(t, 0), H - h);
+    const r = {l, t, r: l + w, b: t + h};
+    let coste = orden;  // a igualdad, la más preferida
+    nombres.forEach((n) => { coste += solape(r, n) * 100; });
+    circulos.forEach((k) => { coste += solape(r, k); });
+    if (!mejor || coste < mejor.coste) mejor = {l, t, coste};
+  });
+  caja.style.left = mejor.l + 'px';
+  caja.style.top = mejor.t + 'px';
 });
 grafico.on('plotly_unhover', () => { caja.style.display = 'none'; });
 """
