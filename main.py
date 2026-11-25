@@ -14,11 +14,13 @@ if sys.platform == "darwin" and os.environ.get("MPLBACKEND", "").lower() not in 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from PIL import Image, ImageDraw, ImageFont
 
 EXCEL = Path("/Users/karlasolarte/Andalucia FP/matrizbcg.xlsx")
 SALIDA = Path(__file__).with_name("matriz_bcg.png")
+SALIDA_WEB = Path(__file__).with_name("docs") / "index.html"  # publicada en GitHub Pages
 
 # Umbrales de la matriz
 UMBRAL_CUOTA = 1.0         # cuota relativa = 1 -> igual que el líder/competidor
@@ -194,10 +196,65 @@ def activar_hover(fig, ax, circulos):
     fig.canvas.mpl_connect("motion_notify_event", al_mover)
 
 
+def crear_web(df):
+    """Versión web interactiva del mismo gráfico (hover en el navegador)."""
+    x_max = max(df["cuota_relativa"].max() * 1.2, 2 * UMBRAL_CUOTA)
+    y_min = min(df["crecimiento_%"].min() - 10, -10)
+    y_max = df["crecimiento_%"].max() + 15
+
+    fig = go.Figure(go.Scatter(
+        x=df["cuota_relativa"], y=df["crecimiento_%"],
+        mode="markers+text", text=df["producto"], textposition="middle right",
+        textfont=dict(color=GRIS_TEXTO, size=13, weight="bold"),
+        marker=dict(size=(df["peso_cartera_%"] * 80 + 150) ** 0.5 * 1.33, sizemode="diameter",
+                    color=[COLORES_CUADRANTE[c] for c in df["cuadrante"]], opacity=0.85,
+                    line=dict(color="white", width=1.5)),
+        customdata=[[coma(c, 2), coma(g)] for c, g in zip(df["cuota_relativa"], df["crecimiento_%"])],
+        hovertemplate=("Cuota de mercado relativa: %{customdata[0]}<br>"
+                       "Crecimiento del mercado: %{customdata[1]} %<extra></extra>"),
+        hoverlabel=dict(bgcolor="white", bordercolor=[COLORES_CUADRANTE[c] for c in df["cuadrante"]],
+                        font=dict(color=GRIS_TEXTO, size=13)),
+    ))
+
+    # Líneas divisorias de la matriz
+    linea = dict(color=GRIS_CLARO, width=1)
+    fig.add_vline(x=UMBRAL_CUOTA, line=linea, layer="below")
+    fig.add_hline(y=UMBRAL_CRECIMIENTO, line=linea, layer="below")
+
+    # Símbolo de cada cuadrante en su esquina (eje X invertido)
+    for emoji, x, y, xa, ya in [("⭐", 0.01, 0.99, "left", "top"), ("❓", 0.99, 0.99, "right", "top"),
+                                ("🐄", 0.01, 0.01, "left", "bottom"), ("🐕", 0.99, 0.01, "right", "bottom")]:
+        fig.add_annotation(text=emoji, x=x, y=y, xref="paper", yref="paper",
+                           xanchor=xa, yanchor=ya, showarrow=False, font=dict(size=36))
+
+    eje = dict(showgrid=False, zeroline=False, showline=True, linecolor=GRIS, ticks="",
+               tickfont=dict(color=GRIS_TEXTO, size=12), title_font=dict(color=GRIS_TEXTO, size=13))
+    marcas_x = np.arange(0, x_max + 0.01, 0.5)
+    marcas_y = np.arange(np.ceil(y_min / 20) * 20, y_max + 0.01, 20)
+    fig.update_xaxes(range=[x_max, 0], title="Cuota de mercado relativa",
+                     tickvals=marcas_x, ticktext=[coma(v) for v in marcas_x], **eje)
+    fig.update_yaxes(range=[y_min - 3, y_max + 3], title="Crecimiento del mercado",
+                     tickvals=marcas_y, ticktext=[f"{v:+.0f} %".replace("+0", "0") for v in marcas_y], **eje)
+    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
+                      font=dict(family="Arial, Helvetica, sans-serif"),
+                      margin=dict(l=70, r=40, t=30, b=60), hovermode="closest")
+
+    SALIDA_WEB.parent.mkdir(exist_ok=True)
+    fig.write_html(SALIDA_WEB, include_plotlyjs="cdn", full_html=True,
+                   config={"displayModeBar": False, "responsive": True},
+                   default_width="100%", default_height="95vh")
+    html = SALIDA_WEB.read_text(encoding="utf-8")
+    html = html.replace("<head>", '<head><title>Matriz BCG</title>'
+                        '<meta name="viewport" content="width=device-width, initial-scale=1">', 1)
+    SALIDA_WEB.write_text(html, encoding="utf-8")
+    print(f"Página web guardada en: {SALIDA_WEB}")
+
+
 def main():
     df = cargar_datos()
     tabla = df[["producto", "cuota_relativa", "crecimiento_%", "peso_cartera_%", "cuadrante"]]
     print(tabla.to_string(index=False, float_format=lambda v: f"{v:,.2f}"))
+    crear_web(df)
     dibujar(df)
 
 
