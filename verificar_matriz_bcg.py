@@ -26,7 +26,7 @@ import openpyxl
 import pandas as pd
 from matplotlib.transforms import Bbox
 
-EXCEL = Path("/Users/karlasolarte/Andalucia FP/matrizbcgdatos.xlsx")
+EXCEL = Path(__file__).with_name("matrizbcgdatos.xlsx")  # el Excel va junto al script
 SALIDA = Path(__file__).with_name("matriz_bcg_verificada.png")
 
 UMBRAL_CRECIMIENTO = 0.10  # 10 %
