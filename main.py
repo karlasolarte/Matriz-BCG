@@ -3,7 +3,10 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from PIL import Image, ImageDraw, ImageFont
 
 EXCEL = Path("/Users/karlasolarte/Andalucia FP/matrizbcg.xlsx")
 SALIDA = Path(__file__).with_name("matriz_bcg.png")
@@ -44,11 +47,35 @@ def cargar_datos():
 GRIS_CLARO = "#D9D9D9"
 GRIS = "#BFBFBF"
 GRIS_TEXTO = "#7F7F7F"
-GRIS_OSCURO = "#404040"
 
 # Color de cada círculo según su cuadrante
 COLORES_CUADRANTE = {"Estrella": "#f2b705", "Interrogante": "#2a7de1",
                      "Vaca": "#2e9e5b", "Perro": "#c0392b"}
+
+
+# Símbolo de cada cuadrante (emoji) y su alternativa si no hay fuente de emojis
+FUENTE_EMOJI = "/System/Library/Fonts/Apple Color Emoji.ttc"
+SIMBOLOS = {"Estrella": ("⭐", "★"), "Interrogante": ("❓", "?"),
+            "Vaca": ("🐄", "$"), "Perro": ("🐕", "✕")}
+
+
+def emoji_como_imagen(emoji):
+    """Dibuja un emoji en color como imagen (matplotlib no sabe pintarlos como texto)."""
+    fuente = ImageFont.truetype(FUENTE_EMOJI, 160)
+    lienzo = Image.new("RGBA", (180, 180), (0, 0, 0, 0))
+    ImageDraw.Draw(lienzo).text((0, 0), emoji, font=fuente, embedded_color=True)
+    return np.asarray(lienzo.crop(lienzo.getbbox()))
+
+
+def poner_simbolo(ax, cuadrante_, x, y, ha, va):
+    """Coloca el símbolo del cuadrante en la esquina indicada."""
+    emoji, alternativo = SIMBOLOS[cuadrante_]
+    try:
+        imagen = OffsetImage(emoji_como_imagen(emoji), zoom=0.22)
+        caja = (0 if ha == "left" else 1, 1 if va == "top" else 0)
+        ax.add_artist(AnnotationBbox(imagen, (x, y), box_alignment=caja, frameon=False))
+    except OSError:  # sin fuente de emojis: símbolo de texto
+        ax.text(x, y, alternativo, ha=ha, va=va, fontsize=20, color=GRIS, weight="bold")
 
 
 def coma(valor, decimales=1):
@@ -68,7 +95,7 @@ def dibujar(df):
     foco = producto_foco(df)
 
     fig, ax = plt.subplots(figsize=(11, 7.5))
-    fig.subplots_adjust(left=0.08, right=0.95, top=0.80, bottom=0.12)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.12)
 
     x_max = max(df["cuota_relativa"].max() * 1.2, 2 * UMBRAL_CUOTA)
     y_min = min(df["crecimiento_%"].min() - 10, -10)
@@ -87,12 +114,11 @@ def dibujar(df):
     ax.axvline(UMBRAL_CUOTA, color=GRIS_CLARO, lw=1, zorder=0)
     ax.axhline(UMBRAL_CRECIMIENTO, color=GRIS_CLARO, lw=1, zorder=0)
 
-    # Nombres de cuadrante en gris, sin competir con los datos
-    cuad = dict(fontsize=11, color=GRIS, weight="bold")
-    ax.text(x_max * 0.98, y_max, "ESTRELLAS", ha="left", va="top", **cuad)
-    ax.text(0.02, y_max, "INTERROGANTES", ha="right", va="top", **cuad)
-    ax.text(x_max * 0.98, y_min, "VACAS LECHERAS", ha="left", va="bottom", **cuad)
-    ax.text(0.02, y_min, "PERROS", ha="right", va="bottom", **cuad)
+    # Símbolo de cada cuadrante en su esquina
+    poner_simbolo(ax, "Estrella", x_max * 0.98, y_max, "left", "top")
+    poner_simbolo(ax, "Interrogante", 0.02, y_max, "right", "top")
+    poner_simbolo(ax, "Vaca", x_max * 0.98, y_min, "left", "bottom")
+    poner_simbolo(ax, "Perro", 0.02, y_min, "right", "bottom")
 
     # 2. Círculos con el color de su cuadrante
     for _, f in df.iterrows():
@@ -112,30 +138,19 @@ def dibujar(df):
             ax.annotate(texto, (f["cuota_relativa"], UMBRAL_CRECIMIENTO),
                         textcoords="offset points", xytext=(radio + 8, 5 if arriba else -5),
                         ha="left", va="bottom" if arriba else "top",
-                        fontsize=10.5, color=COLORES_CUADRANTE[f["cuadrante"]], weight="bold", linespacing=1.5)
+                        fontsize=10.5, color=GRIS_TEXTO, weight="bold", linespacing=1.5)
         else:
             ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
                         textcoords="offset points", xytext=(radio + 6, 0),
-                        ha="left", va="center", fontsize=9.5, color=GRIS_TEXTO)
+                        ha="left", va="center", fontsize=9.5, color=GRIS_TEXTO, weight="bold")
 
     ax.set_xlim(x_max, 0)  # convención BCG: mayor cuota a la izquierda
     ax.set_ylim(y_min - 3, y_max + 3)
 
-    # Títulos de eje alineados arriba/izquierda para leerlos primero
-    ax.set_xlabel("Cuota de mercado relativa", loc="left", color=GRIS_TEXTO, fontsize=10)
-    ax.set_ylabel("Crecimiento del mercado", loc="top", color=GRIS_TEXTO, fontsize=10)
+    # Títulos de eje centrados
+    ax.set_xlabel("Cuota de mercado relativa", loc="center", color=GRIS_TEXTO, fontsize=10)
+    ax.set_ylabel("Crecimiento del mercado", loc="center", color=GRIS_TEXTO, fontsize=10)
 
-    # 4. Título que cuenta la conclusión, alineado a la izquierda
-    if foco["cuadrante"] == "Interrogante":
-        titulo = f"{foco['producto']} necesita una decisión de inversión"
-        subtitulo = (f"Su mercado crece un {coma(foco['crecimiento_%'])} %, pero vendemos menos que el "
-                     f"principal competidor. Supone el {coma(foco['peso_cartera_%'], 0)} % de nuestras ventas:\n"
-                     "si ganamos cuota puede ser una estrella; si no, acabará como perro.")
-    else:
-        titulo = "Matriz BCG de la cartera de productos"
-        subtitulo = ""
-    fig.text(0.08, 0.95, titulo, fontsize=17, color=GRIS_OSCURO, weight="bold", ha="left", va="top")
-    fig.text(0.08, 0.895, subtitulo, fontsize=11, color=GRIS_TEXTO, ha="left", va="top", linespacing=1.5)
     fig.text(0.08, 0.025, "Fuente: matrizbcg.xlsx", fontsize=8.5, color=GRIS, ha="left")
 
     fig.savefig(SALIDA, dpi=150)
