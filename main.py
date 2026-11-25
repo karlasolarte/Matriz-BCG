@@ -83,19 +83,11 @@ def coma(valor, decimales=1):
     return f"{valor:.{decimales}f}".replace(".", ",")
 
 
-def producto_foco(df):
-    """Producto sobre el que gira la historia: el interrogante con más peso en ventas."""
-    interrogantes = df[df["cuadrante"] == "Interrogante"]
-    candidatos = interrogantes if not interrogantes.empty else df
-    return candidatos.loc[candidatos["peso_cartera_%"].idxmax()]
-
-
 def dibujar(df):
     plt.rcParams["font.family"] = ["Arial", "DejaVu Sans"]
-    foco = producto_foco(df)
 
     fig, ax = plt.subplots(figsize=(11, 7.5))
-    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.12)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.10)
 
     x_max = max(df["cuota_relativa"].max() * 1.2, 2 * UMBRAL_CUOTA)
     y_min = min(df["crecimiento_%"].min() - 10, -10)
@@ -122,27 +114,16 @@ def dibujar(df):
 
     # 2. Círculos con el color de su cuadrante
     for _, f in df.iterrows():
-        es_foco = f["producto"] == foco["producto"]
         area = f["peso_cartera_%"] * 80 + 150
         radio = area ** 0.5 / 2  # en puntos
         ax.scatter(f["cuota_relativa"], f["crecimiento_%"], s=area,
                    color=COLORES_CUADRANTE[f["cuadrante"]], alpha=0.85,
-                   edgecolors="white", linewidths=1.5, zorder=3 if es_foco else 2)
+                   edgecolors="white", linewidths=1.5, zorder=2)
 
         # 3. Etiquetado directo (sin leyenda)
-        if es_foco:
-            texto = (f"{f['producto']}\n"
-                     f"Cuota {coma(f['cuota_relativa'], 2)} · Mercado {f['crecimiento_%']:+.1f} %".replace(".", ","))
-            # Se apoya en la línea divisoria, dentro de su cuadrante, para que no la cruce
-            arriba = f["crecimiento_%"] >= UMBRAL_CRECIMIENTO
-            ax.annotate(texto, (f["cuota_relativa"], UMBRAL_CRECIMIENTO),
-                        textcoords="offset points", xytext=(radio + 8, 5 if arriba else -5),
-                        ha="left", va="bottom" if arriba else "top",
-                        fontsize=10.5, color=GRIS_TEXTO, weight="bold", linespacing=1.5)
-        else:
-            ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
-                        textcoords="offset points", xytext=(radio + 6, 0),
-                        ha="left", va="center", fontsize=9.5, color=GRIS_TEXTO, weight="bold")
+        ax.annotate(f["producto"], (f["cuota_relativa"], f["crecimiento_%"]),
+                    textcoords="offset points", xytext=(radio + 6, 0),
+                    ha="left", va="center", fontsize=9.5, color=GRIS_TEXTO, weight="bold")
 
     ax.set_xlim(x_max, 0)  # convención BCG: mayor cuota a la izquierda
     ax.set_ylim(y_min - 3, y_max + 3)
@@ -151,7 +132,6 @@ def dibujar(df):
     ax.set_xlabel("Cuota de mercado relativa", loc="center", color=GRIS_TEXTO, fontsize=10)
     ax.set_ylabel("Crecimiento del mercado", loc="center", color=GRIS_TEXTO, fontsize=10)
 
-    fig.text(0.08, 0.025, "Fuente: matrizbcg.xlsx", fontsize=8.5, color=GRIS, ha="left")
 
     fig.savefig(SALIDA, dpi=150)
     print(f"\nGráfico guardado en: {SALIDA}")
